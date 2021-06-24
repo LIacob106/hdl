@@ -46,7 +46,7 @@
 
 module frame_align_tb;
   parameter VCD_FILE = "frame_align_tb.vcd";
-  parameter NUM_LANES = 4;
+  parameter NUM_LANES = 1;
   parameter NUM_LINKS = 1;
   parameter OCTETS_PER_FRAME = 3;
   parameter FRAMES_PER_MULTIFRAME = 8;
@@ -186,8 +186,7 @@ module frame_align_tb;
     #50000;
     align_err_f = 1'b0;
     align_err_mf = 1'b0;
-    #100000;
-    $finish;
+	#100000;
   end
 
   always @(posedge clk) begin
@@ -509,7 +508,118 @@ module frame_align_tb;
     .status_synth_params1(),
     .status_synth_params2()
   );
+  
+  wire m_axis_aresetn;
+  wire m_axis_ready;
+  wire m_axis_valid;
+  wire [DATA_PATH_WIDTH*8-1:0] m_axis_data;
+  wire [DATA_PATH_WIDTH-1:0] m_axis_tkeep;
+  wire m_axis_tlast;
+  wire [DATA_PATH_WIDTH-1:0] m_axis_level;
+  wire m_axis_empty;
+  wire m_axis_almost_empty;
 
+  wire s_axis_aresetn;
+  wire s_axis_ready;
+  wire s_axis_valid;
+  wire [DATA_PATH_WIDTH-1:0] s_axis_tkeep;
+  wire s_axis_tlast;
+  wire [DATA_PATH_WIDTH-1:0] s_axis_room;
+  wire s_axis_full;
+  wire s_axis_almost_full;
+  
+  
+  reg invalid_data = 1'b0;
+  reg fifo_s_reset = 1'b1;
+  reg fifo_m_reset = 1'b1;
+  
+  assign s_axis_aresetn = fifo_s_reset;
+  assign m_axis_aresetn = fifo_m_reset;
+  assign m_axis_ready = rx_valid; 
+  assign s_axis_valid = tx_ready;
+  
+  //util_axis_fifo instance
+  util_axis_fifo #(
+    .DATA_WIDTH(DATA_PATH_WIDTH*8),
+    .ADDRESS_WIDTH(DATA_PATH_WIDTH),
+    .ASYNC_CLK(0),
+    .M_AXIS_REGISTERED(0),
+    .ALMOST_EMPTY_THRESHOLD(16),
+    .ALMOST_FULL_THRESHOLD(16),
+    .TLAST_EN(0),
+    .TKEEP_EN(0),
+    .REMOVE_NULL_BEAT_EN(0)
+  ) some_fifo(
+    //rx is master so rx is "reading" from fifo
+    .m_axis_aclk(clk),
+    .m_axis_aresetn(m_axis_aresetn),
+    .m_axis_ready(m_axis_ready),
+    .m_axis_valid(m_axis_valid),
+    .m_axis_data(m_axis_data),
+    .m_axis_tkeep(m_axis_tkeep),
+    .m_axis_tlast(m_axis_tlast),
+    .m_axis_level(m_axis_level),
+    .m_axis_empty(m_axis_empty),
+    .m_axis_almost_empty(m_axis_almost_empty),
+    //tx is slave so tx writes in fifo
+    .s_axis_aclk(clk),
+    .s_axis_aresetn(s_axis_aresetn),
+    .s_axis_ready(s_axis_ready),
+    .s_axis_valid(s_axis_valid),
+    .s_axis_data(tx_data),
+    .s_axis_tkeep(s_axis_tkeep),
+    .s_axis_tlast(s_axis_tlast),
+    .s_axis_room(s_axis_room),
+    .s_axis_full(s_axis_full),
+    .s_axis_almost_full(s_axis_almost_full)
+);
+  
+  always @ (posedge align_err_f) begin
+		//reset fifo
+        fifo_m_reset <= 1'b0;
+		fifo_s_reset <= 1'b0;
+        invalid_data = 0;
+  end
+  
+  always @ (posedge align_err_mf) begin
+		//reset fifo
+		fifo_m_reset <= 1'b0;
+		fifo_s_reset <= 1'b0;
+        invalid_data = 0;
+  end
+  
+          
+  always @ (negedge align_err_f) begin
+    if (align_err_mf == 0) begin
+		//get fifo out of reset
+        fifo_m_reset = 1'b1;
+		fifo_s_reset = 1'b1;
+		invalid_data <= 1'b0;
+        #5; //wait for tx_ready to rise up
+    end
+  end
+  
+  always @(negedge align_err_mf) begin
+    if (align_err_f == 0) begin
+        //get fifo out of reset
+        fifo_m_reset = 1'b1;
+		fifo_s_reset = 1'b1;
+		invalid_data <= 1'b0;
+        #5; //wait for tx_ready to rise up
+    end
+  end
+
+  
+  always @(posedge clk) begin
+    if (rx_valid == 1) begin
+        //remove from the queue first element and compare to rx_data
+        //compare the data sent by tx with the data recieved
+        if(rx_data[DATA_PATH_WIDTH*8-1:0] !== m_axis_data && align_err_f == 0 && align_err_mf == 0) begin 
+            invalid_data <= 1'b1;
+        end
+    end 
+  end
+  
   assign cur_data_mismatch = (rx_data & rx_mask) !== ({NUM_LANES{rx_ref_data}} & rx_mask);
 
   always @(posedge clk) begin
@@ -537,6 +647,8 @@ module frame_align_tb;
     end
   end endgenerate
 
+  //old tb test
+  /*
   always @(*) begin
     if (rx_valid !== 1'b1 || tx_ready !== 1'b1 || data_mismatch == 1'b1 ||
         &lane_latency_match != 1'b1) begin
@@ -545,4 +657,12 @@ module frame_align_tb;
       failed <= 1'b0;
     end
   end
+  */
+  
+  always @(*) begin
+	if(rx_valid == 1'b1 && tx_ready == 1'b1 && invalid_data == 1'b1) begin
+		failed <= 1'b1;
+	end 
+  end
+  
 endmodule
