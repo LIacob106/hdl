@@ -38,8 +38,8 @@
 // or publication in which you use this JESD204 HDL core. (You are not required
 // to do so; it is up to your common sense to decide whether you want to comply
 // with this request or not.) For general publications, we suggest referencing :
-// ‚ÄúThe design and implementation of the JESD204 HDL Core used in this project
-// is copyright ¬© 2016-2017, Analog Devices, Inc.‚Äù
+// ìThe design and implementation of the JESD204 HDL Core used in this project
+// is copyright © 2016-2017, Analog Devices, Inc.î
 //
 
 `timescale 1ns/100ps
@@ -84,6 +84,7 @@ module frame_align_tb;
   wire [DATA_PATH_WIDTH-1:0] rx_sof;
   wire cur_data_mismatch;
   reg data_mismatch = 1'b1;
+  reg enable_checker = 1'b0;
   wire [NUM_LINKS-1:0] sync;
 
   always @(posedge clk) begin
@@ -133,8 +134,8 @@ module frame_align_tb;
   reg  [NUM_LANES*DATA_PATH_WIDTH*8-1:0] phy_data_in;
   reg  [NUM_LANES*DATA_PATH_WIDTH-1:0] phy_charisk_in;
 
-  reg align_err_mf;
-  reg align_err_f;
+  reg align_err_mf = 1'b0;
+  reg align_err_f = 1'b0;
   reg cur_err;
 
   reg [9:0] sysref_counter = 'h00;
@@ -167,9 +168,8 @@ module frame_align_tb;
   end
 
   initial begin
-    align_err_mf = 1'b0;
-    align_err_f = 1'b0;
-
+    #10000;
+    enable_checker = 1'b1;
     #100000;
     align_err_f = 1'b1;
     #50000;
@@ -186,7 +186,7 @@ module frame_align_tb;
     #50000;
     align_err_f = 1'b0;
     align_err_mf = 1'b0;
-	#100000;
+    #100000;
   end
 
   always @(posedge clk) begin
@@ -527,14 +527,13 @@ module frame_align_tb;
   wire [DATA_PATH_WIDTH-1:0] s_axis_room;
   wire s_axis_full;
   wire s_axis_almost_full;
-  
+  wire error_inject = (align_err_f | align_err_mf);
   
   reg invalid_data = 1'b0;
-  reg fifo_s_reset = 1'b1;
-  reg fifo_m_reset = 1'b1;
+  reg read_flag = 1'b1;
   
-  assign s_axis_aresetn = fifo_s_reset;
-  assign m_axis_aresetn = fifo_m_reset;
+  assign s_axis_aresetn = ~error_inject;
+  assign m_axis_aresetn = ~error_inject;
   assign m_axis_ready = rx_valid; 
   assign s_axis_valid = tx_ready;
   
@@ -573,50 +572,22 @@ module frame_align_tb;
     .s_axis_full(s_axis_full),
     .s_axis_almost_full(s_axis_almost_full)
 );
-  
-  always @ (posedge align_err_f) begin
-		//reset fifo
-        fifo_m_reset <= 1'b0;
-		fifo_s_reset <= 1'b0;
-        invalid_data = 0;
-  end
-  
-  always @ (posedge align_err_mf) begin
-		//reset fifo
-		fifo_m_reset <= 1'b0;
-		fifo_s_reset <= 1'b0;
-        invalid_data = 0;
-  end
-  
           
-  always @ (negedge align_err_f) begin
-    if (align_err_mf == 0) begin
-		//get fifo out of reset
-        fifo_m_reset = 1'b1;
-		fifo_s_reset = 1'b1;
-		invalid_data <= 1'b0;
-        #5; //wait for tx_ready to rise up
-    end
-  end
-  
-  always @(negedge align_err_mf) begin
-    if (align_err_f == 0) begin
-        //get fifo out of reset
-        fifo_m_reset = 1'b1;
-		fifo_s_reset = 1'b1;
-		invalid_data <= 1'b0;
-        #5; //wait for tx_ready to rise up
+  always @ (negedge error_inject) begin
+    //get fifo out of reset
+    #5000; //wait for tx_ready to rise up
+    if ((rx_valid == 0 || tx_ready == 0) && enable_checker == 1) begin
+      read_flag <= 1'b0;
     end
   end
 
-  
   always @(posedge clk) begin
-    if (rx_valid == 1) begin
-        //remove from the queue first element and compare to rx_data
-        //compare the data sent by tx with the data recieved
-        if(rx_data[DATA_PATH_WIDTH*8-1:0] !== m_axis_data && align_err_f == 0 && align_err_mf == 0) begin 
-            invalid_data <= 1'b1;
-        end
+    if (rx_valid == 1 && error_inject == 0) begin
+      //remove from the queue first element and compare to rx_data
+      //compare the data sent by tx with the data recieved
+      if(rx_data[DATA_PATH_WIDTH*8-1:0] !== m_axis_data) begin 
+        invalid_data <= 1'b1;
+      end
     end 
   end
   
@@ -647,22 +618,10 @@ module frame_align_tb;
     end
   end endgenerate
 
-  //old tb test
-  /*
   always @(*) begin
-    if (rx_valid !== 1'b1 || tx_ready !== 1'b1 || data_mismatch == 1'b1 ||
-        &lane_latency_match != 1'b1) begin
+    if ((rx_valid == 1'b1 && invalid_data == 1'b1) || read_flag == 1'b0) begin
       failed <= 1'b1;
-    end else begin
-      failed <= 1'b0;
-    end
+    end 
   end
-  */
-  
-  always @(*) begin
-	if(rx_valid == 1'b1 && tx_ready == 1'b1 && invalid_data == 1'b1) begin
-		failed <= 1'b1;
-	end 
-  end
-  
+
 endmodule

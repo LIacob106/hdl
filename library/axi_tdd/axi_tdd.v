@@ -1,6 +1,6 @@
 // ***************************************************************************
 // ***************************************************************************
-// Copyright 2014 - 2017 (c) Analog Devices, Inc. All rights reserved.
+// Copyright 2021 (c) Analog Devices, Inc. All rights reserved.
 //
 // In this HDL repository, there are many different and unique modules, consisting
 // of various HDL (Verilog or VHDL) components. The individual modules are
@@ -35,7 +35,7 @@
 
 `timescale 1ns/1ps
 
-module axi_ad9361_tdd (
+module axi_tdd (
 
   // clock
 
@@ -52,7 +52,6 @@ module axi_ad9361_tdd (
   // status signal
 
   output                  tdd_enabled,
-  input       [ 7:0]      tdd_status,
 
   // sync signal
 
@@ -65,19 +64,42 @@ module axi_ad9361_tdd (
   output  reg             tdd_rx_valid,
 
   // bus interface
-
-  input                   up_rstn,
-  input                   up_clk,
-  input                   up_wreq,
-  input       [13:0]      up_waddr,
-  input       [31:0]      up_wdata,
-  output                  up_wack,
-  input                   up_rreq,
-  input       [13:0]      up_raddr,
-  output      [31:0]      up_rdata,
-  output                  up_rack);
+  input                   s_axi_aresetn,
+  input                   s_axi_aclk,
+  input                   s_axi_awvalid,
+  input       [15:0]      s_axi_awaddr,
+  output                  s_axi_awready,
+  input                   s_axi_wvalid,
+  input       [31:0]      s_axi_wdata,
+  input       [ 3:0]      s_axi_wstrb,
+  output                  s_axi_wready,
+  output                  s_axi_bvalid,
+  output      [ 1:0]      s_axi_bresp,
+  input                   s_axi_bready,
+  input                   s_axi_arvalid,
+  input       [15:0]      s_axi_araddr,
+  output                  s_axi_arready,
+  output                  s_axi_rvalid,
+  output      [ 1:0]      s_axi_rresp,
+  output      [31:0]      s_axi_rdata,
+  input                   s_axi_rready
+  );
 
   // internal signals
+
+  wire              up_rstn;
+  wire              up_clk;
+  wire              up_wreq;
+  wire    [13:0]    up_waddr;
+  wire    [31:0]    up_wdata;
+  wire              up_wack;
+  wire              up_rreq;
+  wire    [13:0]    up_raddr;
+  wire    [31:0]    up_rdata;
+  wire              up_rack;
+
+  assign up_clk  = s_axi_aclk;
+  assign up_rstn = s_axi_aresetn;
 
   wire              tdd_enable_s;
   wire              tdd_secondary_s;
@@ -114,11 +136,15 @@ module axi_ad9361_tdd (
   wire    [23:0]    tdd_tx_off_2_s;
   wire    [23:0]    tdd_tx_dp_on_2_s;
   wire    [23:0]    tdd_tx_dp_off_2_s;
+  wire    [ 7:0]    tdd_status;
 
   wire    [23:0]    tdd_counter_status;
 
   wire              tdd_rx_dp_en_s;
   wire              tdd_tx_dp_en_s;
+
+  reg               tdd_vco_overlap;
+  reg               tdd_rf_overlap;
 
   assign  tdd_enabled = tdd_enable_s;
 
@@ -150,9 +176,23 @@ module axi_ad9361_tdd (
     end
   end
 
+  always @(posedge clk) begin
+    if(rst == 1'b1) begin
+      tdd_vco_overlap <= 1'b0;
+      tdd_rf_overlap <= 1'b0;
+    end else begin
+      tdd_vco_overlap <= tdd_rx_vco_en & tdd_tx_vco_en;
+      tdd_rf_overlap <= tdd_rx_rf_en & tdd_tx_rf_en;
+    end
+  end
+
+  assign tdd_status = {6'b0, tdd_rf_overlap, tdd_vco_overlap};
+
   // instantiations
 
-  up_tdd_cntrl i_up_tdd_cntrl(
+  up_tdd_cntrl #(
+    .BASE_ADDRESS('h0))
+  i_up_tdd_cntrl(
     .clk(clk),
     .rst(rst),
     .tdd_enable(tdd_enable_s),
@@ -201,12 +241,9 @@ module axi_ad9361_tdd (
     .up_rdata(up_rdata),
     .up_rack(up_rack));
 
-  // the TX_DATA_PATH_DELAY and CONTROL_PATH_DELAY are specificly defined
-  // for the axi_ad9361 core
-
   ad_tdd_control #(
-    .TX_DATA_PATH_DELAY(),
-    .CONTROL_PATH_DELAY())
+    .TX_DATA_PATH_DELAY(0),
+    .CONTROL_PATH_DELAY(0))
   i_tdd_control(
     .clk(clk),
     .rst(rst),
@@ -249,5 +286,39 @@ module axi_ad9361_tdd (
     .tdd_rx_rf_en(tdd_rx_rf_en),
     .tdd_tx_rf_en(tdd_tx_rf_en),
     .tdd_counter_status(tdd_counter_status));
+
+  up_axi #(
+    .AXI_ADDRESS_WIDTH(16))
+  i_up_axi (
+    .up_rstn(s_axi_aresetn),
+    .up_clk(s_axi_aclk),
+
+    .up_axi_awvalid(s_axi_awvalid),
+    .up_axi_awaddr(s_axi_awaddr),
+    .up_axi_awready(s_axi_awready),
+    .up_axi_wvalid(s_axi_wvalid),
+    .up_axi_wdata(s_axi_wdata),
+    .up_axi_wstrb(s_axi_wstrb),
+    .up_axi_wready(s_axi_wready),
+    .up_axi_bvalid(s_axi_bvalid),
+    .up_axi_bresp(s_axi_bresp),
+    .up_axi_bready(s_axi_bready),
+    .up_axi_arvalid(s_axi_arvalid),
+    .up_axi_araddr(s_axi_araddr),
+    .up_axi_arready(s_axi_arready),
+    .up_axi_rvalid(s_axi_rvalid),
+    .up_axi_rresp(s_axi_rresp),
+    .up_axi_rdata(s_axi_rdata),
+    .up_axi_rready(s_axi_rready),
+
+    .up_wreq(up_wreq),
+    .up_waddr(up_waddr),
+    .up_wdata(up_wdata),
+    .up_wack(up_wack),
+    .up_rreq(up_rreq),
+    .up_raddr(up_raddr),
+    .up_rdata(up_rdata),
+    .up_rack(up_rack)
+  );
 
 endmodule
