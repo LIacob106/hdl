@@ -57,14 +57,12 @@ FMC & BOB carrier designs includes loopback daughtercards for connectivity testi
 ```
 [some-directory]> make -C no-OS/adrv9361z7035/ccbob_cmos run
 ```
+# ADRV9361Z7035 HDL Project
 
-## Documentation
-
- * [HDL Design User Guide]
- * [IP User Guide]
- * [ADRV9361Z7035 Wiki page]
- 
-[HDL Design User Guide]:http://wiki.analog.com/resources/fpga/docs/hdl
-[IP User Guide]:http://wiki.analog.com/resources/fpga/docs/axi_ad9361 
-[ADRV9361Z7035 Wiki page]:https://wiki.analog.com/resources/eval/user-guides/picozed_sdr
+Here are some pointers to help you:
+  * [https://www.analog.com/ADRV9361-Z7035](Board Product Page)
+  * Parts : [https://www.analog.com/ad9361]()
+  * Project Doc: https://wiki.analog.com/resources/eval/user-guides/adrv936x_rfsom
+  * HDL Doc: https://wiki.analog.com/resources/eval/user-guides/ad-fmcomms4-ebz
+  * Linux Drivers: https://wiki.analog.com/resources/tools-software/linux-drivers/iio-transceiver/ad9361
 
