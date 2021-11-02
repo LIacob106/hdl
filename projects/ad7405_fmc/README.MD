@@ -1,12 +1,9 @@
-# HDL Reference Design for EVAL-AD7405 and EVAL-ADuM7701
+# AD7405-FMC HDL Project
 
-## Product page
-
-http://www.analog.com/en/products/analog-to-digital-converters/integrated-special-purpose-converters/isolated-ad-converters/ad7405.html
-
-## Supported parts
-
-  * AD7405
-
-  * ADuM7701
-
+Here are some pointers to help you:
+  * [https://www.analog.com/eval-ad7405.html](Board Product Page)
+  * Parts : [https://www.analog.com/ad7405 \
+			https://www.analog.com/adum7701]()
+  * Project Doc: 
+  * HDL Doc: 
+  * Linux Drivers:
