@@ -42,16 +42,26 @@ module axi_adrv9001 #(
   parameter DDS_DISABLE = 0,
   parameter INDEPENDENT_1R1T_SUPPORT = 1,
   parameter COMMON_2R2T_SUPPORT = 1,
+  parameter DISABLE_RX2_SSI = 0,
+  parameter DISABLE_TX2_SSI = 0,
+  parameter RX_USE_BUFG = 0,
+  parameter TX_USE_BUFG = 0,
+  parameter IODELAY_CTRL = 1,
   parameter IO_DELAY_GROUP = "dev_if_delay_group",
   parameter FPGA_TECHNOLOGY = 0,
   parameter FPGA_FAMILY = 0,
   parameter SPEED_GRADE = 0,
   parameter DEV_PACKAGE = 0,
+  parameter EXT_SYNC = 0,
   parameter USE_RX_CLK_FOR_TX = 0
 ) (
   input                   ref_clk,
   input                   mssi_sync,
   input                   tx_output_enable,
+
+  // external synchronization signals
+  input                   adc_sync_in,
+  input                   dac_sync_in,
 
   // physical interface
   input                   rx1_dclk_in_n_NC,
@@ -269,9 +279,14 @@ module axi_adrv9001 #(
     .FPGA_TECHNOLOGY (FPGA_TECHNOLOGY),
     .NUM_LANES (NUM_LANES),
     .DRP_WIDTH (DRP_WIDTH),
+    .RX_USE_BUFG (RX_USE_BUFG),
+    .TX_USE_BUFG (TX_USE_BUFG),
+    .IODELAY_CTRL (IODELAY_CTRL),
     .IO_DELAY_GROUP (IO_DELAY_GROUP),
-   .USE_RX_CLK_FOR_TX (USE_RX_CLK_FOR_TX)
-  ) i_if(
+    .DISABLE_RX2_SSI (DISABLE_RX2_SSI),
+    .DISABLE_TX2_SSI (DISABLE_TX2_SSI),
+    .USE_RX_CLK_FOR_TX (USE_RX_CLK_FOR_TX)
+  ) i_if (
 
     //
     // Physical interface
@@ -389,11 +404,10 @@ module axi_adrv9001 #(
     .tx2_single_lane (tx2_single_lane),
     .tx2_sdr_ddr_n (tx2_sdr_ddr_n),
     .tx2_symb_op (tx2_symb_op),
-    .tx2_symb_8_16b (tx2_symb_8_16b)
-  );
+    .tx2_symb_8_16b (tx2_symb_8_16b));
 
   // common processor control
-  axi_ad9001_core #(
+  axi_adrv9001_core #(
     .ID (ID),
     .NUM_LANES (NUM_LANES),
     .CMOS_LVDS_N (CMOS_LVDS_N),
@@ -403,10 +417,13 @@ module axi_adrv9001 #(
     .DDS_DISABLE (DDS_DISABLE),
     .INDEPENDENT_1R1T_SUPPORT (INDEPENDENT_1R1T_SUPPORT),
     .COMMON_2R2T_SUPPORT (COMMON_2R2T_SUPPORT),
+    .DISABLE_RX2_SSI (DISABLE_RX2_SSI),
+    .DISABLE_TX2_SSI (DISABLE_TX2_SSI),
     .FPGA_TECHNOLOGY (FPGA_TECHNOLOGY),
     .FPGA_FAMILY (FPGA_FAMILY),
     .SPEED_GRADE (SPEED_GRADE),
-    .DEV_PACKAGE (DEV_PACKAGE)
+    .DEV_PACKAGE (DEV_PACKAGE),
+    .EXT_SYNC (EXT_SYNC)
   ) i_core (
     // ADC interface
     .rx1_clk (adc_1_clk),
@@ -520,6 +537,10 @@ module axi_adrv9001 #(
     .tdd_tx2_rf_en (tdd_tx2_rf_en),
     .tdd_if2_mode (tdd_if2_mode),
 
+    .ref_clk (ref_clk),
+    .adc_sync_in (adc_sync_in),
+    .dac_sync_in (dac_sync_in),
+
     .up_rstn (up_rstn),
     .up_clk (up_clk),
     .up_wreq (up_wreq_s),
@@ -529,8 +550,7 @@ module axi_adrv9001 #(
     .up_rreq (up_rreq_s),
     .up_raddr (up_raddr_s),
     .up_rdata (up_rdata_s),
-    .up_rack (up_rack_s)
-  );
+    .up_rack (up_rack_s));
 
   assign adc_1_valid_i0 = adc_1_valid;
   assign adc_1_valid_q0 = adc_1_valid;
@@ -554,7 +574,7 @@ module axi_adrv9001 #(
   // up bus interface
   up_axi #(
     .AXI_ADDRESS_WIDTH(15)
-    ) i_up_axi (
+  ) i_up_axi (
     .up_rstn (up_rstn),
     .up_clk (up_clk),
     .up_axi_awvalid (s_axi_awvalid),
@@ -581,8 +601,7 @@ module axi_adrv9001 #(
     .up_wack (up_wack_s),
     .up_raddr (up_raddr_s[12:0]),
     .up_rreq (up_rreq_s),
-    .up_rack (up_rack_s)
-  );
+    .up_rack (up_rack_s));
 
   // Alias Rx/Tx peripherals @ 0x8000
   assign up_raddr_s[13] = 1'b0;

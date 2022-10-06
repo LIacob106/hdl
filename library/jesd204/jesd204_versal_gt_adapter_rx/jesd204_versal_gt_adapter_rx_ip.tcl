@@ -42,7 +42,7 @@
 # is copyright © 2016-2017, Analog Devices, Inc.”
 #
 
-source ../../scripts/adi_env.tcl
+source ../../../scripts/adi_env.tcl
 source $ad_hdl_dir/library/scripts/adi_ip_xilinx.tcl
 
 adi_ip_create jesd204_versal_gt_adapter_rx
@@ -63,6 +63,16 @@ adi_add_bus "RX" "master" \
    { "rx_data" "rxdata" } \
    { "rx_header" "rxheader" } \
    { "rx_block_sync" "rxblock_sync" } \
+  }
+
+adi_add_bus "RX_GT_IP_Interface" "master" \
+  "xilinx.com:interface:gt_rx_interface_rtl:1.0" \
+  "xilinx.com:interface:gt_rx_interface:1.0" \
+  { \
+   { "rxdata" "ch_rxdata" } \
+   { "rxheader" "ch_rxheader" } \
+   { "rxheadervalid" "ch_rxheadervalid" } \
+   { "rxgearboxslip" "ch_rxgearboxslip" } \
   }
 
 ipx::save_core [ipx::current_core]

@@ -1,7 +1,7 @@
 
 
 package require qsys 14.0
-source ../scripts/adi_env.tcl
+source ../../scripts/adi_env.tcl
 source ../scripts/adi_ip_intel.tcl
 
 set_module_property NAME axi_dmac
@@ -37,7 +37,7 @@ ad_ip_files axi_dmac [list \
   request_generator.v \
   response_handler.v \
   axi_register_slice.v \
-  2d_transfer.v \
+  dmac_2d_transfer.v \
   dest_axi_mm.v \
   dest_axi_stream.v \
   dest_fifo_inf.v \

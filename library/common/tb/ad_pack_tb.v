@@ -29,15 +29,14 @@ module ad_pack_tb;
     .idata(idata),
     .ivalid(ivalid),
     .odata(odata),
-    .ovalid(ovalid)
-  );
+    .ovalid(ovalid));
 
   task test();
   begin
     @(posedge clk);
     i = 0;
     j = 0;
-    while (i < VECT_W/(I_W*UNIT_W)) begin
+    while (i < (VECT_W/(I_W*UNIT_W) + (VECT_W%(I_W*UNIT_W)>0))) begin
       @(posedge clk);
       if ($urandom % 2 == 0) begin
         idata <= input_vector[i*(I_W*UNIT_W) +: (I_W*UNIT_W)];

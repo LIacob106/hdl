@@ -16,6 +16,7 @@ if {![info exists ADI_PHY_SEL]} {
 }
 
 source $ad_hdl_dir/projects/common/xilinx/data_offload_bd.tcl
+source $ad_hdl_dir/library/jesd204/scripts/jesd204.tcl
 
 # Common parameter for TX and RX
 set JESD_MODE  $ad_project_params(JESD_MODE)
@@ -30,6 +31,14 @@ set SHARED_DEVCLK [ expr { [info exists ad_project_params(SHARED_DEVCLK)] \
 if {$TDD_SUPPORT && !$SHARED_DEVCLK} {
   error "ERROR: Cannot enable TDD support without shared deviceclocks!"
 }
+
+set adc_do_mem_type [ expr { [info exists ad_project_params(ADC_DO_MEM_TYPE)] \
+                          ? $ad_project_params(ADC_DO_MEM_TYPE) : 0 } ]
+set dac_do_mem_type [ expr { [info exists ad_project_params(DAC_DO_MEM_TYPE)] \
+                          ? $ad_project_params(DAC_DO_MEM_TYPE) : 0 } ]
+
+set do_axi_data_width [ expr { [info exists do_axi_data_width] \
+                          ? $do_axi_data_width : 256 } ]
 
 if {$JESD_MODE == "8B10B"} {
   set DATAPATH_WIDTH 4
@@ -68,13 +77,7 @@ if {$RX_DMA_SAMPLE_WIDTH == 12} {
   set RX_DMA_SAMPLE_WIDTH 16
 }
 
-set RX_JESD_F [expr ($RX_JESD_M*$RX_JESD_S*$RX_JESD_NP)/(8*$RX_JESD_L)]
-# For F=3,6,12 use dual clock
-if {$RX_JESD_F % 3 == 0} {
-  set RX_DATAPATH_WIDTH [expr max($RX_JESD_F,$NP12_DATAPATH_WIDTH)]
-} else {
-  set RX_DATAPATH_WIDTH [expr max($RX_JESD_F,$DATAPATH_WIDTH)]
-}
+set RX_DATAPATH_WIDTH [adi_jesd204_calc_tpl_width $DATAPATH_WIDTH $RX_JESD_L $RX_JESD_M $RX_JESD_S $RX_JESD_NP]
 
 set RX_SAMPLES_PER_CHANNEL [expr $RX_NUM_OF_LANES * 8* $RX_DATAPATH_WIDTH / ($RX_NUM_OF_CONVERTERS * $RX_SAMPLE_WIDTH)]
 
@@ -97,13 +100,7 @@ if {$TX_DMA_SAMPLE_WIDTH == 12} {
   set TX_DMA_SAMPLE_WIDTH 16
 }
 
-set TX_JESD_F [expr ($TX_JESD_M*$TX_JESD_S*$TX_JESD_NP)/(8*$TX_JESD_L)]
-# For F=3,6,12 use dual clock
-if {$TX_JESD_F % 3 == 0} {
-  set TX_DATAPATH_WIDTH [expr max($TX_JESD_F,$NP12_DATAPATH_WIDTH)]
-} else {
-  set TX_DATAPATH_WIDTH [expr max($TX_JESD_F,$DATAPATH_WIDTH)]
-}
+set TX_DATAPATH_WIDTH [adi_jesd204_calc_tpl_width $DATAPATH_WIDTH $TX_JESD_L $TX_JESD_M $TX_JESD_S $TX_JESD_NP]
 
 set TX_SAMPLES_PER_CHANNEL [expr $TX_NUM_OF_LANES * 8* $TX_DATAPATH_WIDTH / ($TX_NUM_OF_CONVERTERS * $TX_SAMPLE_WIDTH)]
 
@@ -135,9 +132,11 @@ if {$ADI_PHY_SEL == 1} {
 } else {
   source $ad_hdl_dir/projects/ad9081_fmca_ebz/common/versal_transceiver.tcl
 
-  create_bd_cell -type container -reference jesd_phy jesd204_phy
-
-  create_bd_port -dir I gt_reset
+  set REF_CLK_RATE [ expr { [info exists ad_project_params(REF_CLK_RATE)] \
+                            ? $ad_project_params(REF_CLK_RATE) : 360 } ]
+  # TODO: 
+  # Assumption is that number of Tx and Rx lane is the same
+  create_versal_phy jesd204_phy $TX_NUM_OF_LANES $RX_LANE_RATE $TX_LANE_RATE $REF_CLK_RATE
 
 }
 
@@ -195,11 +194,11 @@ ad_ip_instance util_cpack2 util_mxfe_cpack [list \
 set adc_data_offload_size [expr $adc_data_width / 8 * 2**$adc_fifo_address_width]
 ad_data_offload_create $adc_data_offload_name \
                        0 \
-                       0 \
+                       $adc_do_mem_type \
                        $adc_data_offload_size \
                        $adc_data_width \
                        $adc_data_width \
-                       0 0 \
+                       $do_axi_data_width \
                        $SHARED_DEVCLK
 
 ad_ip_instance axi_dmac axi_mxfe_rx_dma
@@ -242,11 +241,11 @@ ad_ip_instance util_upack2 util_mxfe_upack [list \
 set dac_data_offload_size [expr $dac_data_width / 8 * 2**$dac_fifo_address_width]
 ad_data_offload_create $dac_data_offload_name \
                        1 \
-                       0 \
+                       $dac_do_mem_type \
                        $dac_data_offload_size \
                        $dac_data_width \
                        $dac_data_width \
-                       0 0 \
+                       $do_axi_data_width \
                        $SHARED_DEVCLK
 
 ad_ip_instance axi_dmac axi_mxfe_tx_dma
@@ -291,43 +290,23 @@ if {$ADI_PHY_SEL == 1} {
   ad_xcvrcon  util_mxfe_xcvr axi_mxfe_tx_xcvr axi_mxfe_tx_jesd {} {} tx_device_clk
 } else {
 
-  make_bd_intf_pins_external  [get_bd_intf_pins jesd204_phy/gt_bridge_ip_0_diff_gt_ref_clock]
+  ad_connect ref_clk_q0 jesd204_phy/GT_REFCLK
 
-
-  set rx_link_clock  jesd204_phy/rxusrclk_gt_bridge_ip_0
-  set tx_link_clock  jesd204_phy/txusrclk_gt_bridge_ip_0
+  set rx_link_clock  jesd204_phy/rxusrclk_out
+  set tx_link_clock  jesd204_phy/txusrclk_out
 
   # Connect PHY to Link Layer
   for {set j 0}  {$j < $RX_NUM_OF_LANES} {incr j} {
-    ad_ip_instance jesd204_versal_gt_adapter_tx tx_adapt_${j}
-    ad_connect  axi_mxfe_tx_jesd/tx_phy${j} tx_adapt_${j}/TX
-    ad_connect  tx_adapt_${j}/txdata jesd204_phy/ch${j}_txdata_ext
-    ad_connect  tx_adapt_${j}/txheader jesd204_phy/ch${j}_txheader_ext
+    ad_connect  axi_mxfe_tx_jesd/tx_phy${j} jesd204_phy/tx${j}
 
-    ad_ip_instance jesd204_versal_gt_adapter_rx rx_adapt_${j}
-    ad_connect  axi_mxfe_rx_jesd/rx_phy${j} rx_adapt_${j}/RX
-    ad_connect  rx_adapt_${j}/rxdata  jesd204_phy/ch${j}_rxdata_ext
-    ad_connect  rx_adapt_${j}/rxheader jesd204_phy/ch${j}_rxheader_ext
-    ad_connect  rx_adapt_${j}/rxheadervalid jesd204_phy/ch${j}_rxheadervalid_ext
-    ad_connect  rx_adapt_${j}/rxgearboxslip  jesd204_phy/ch${j}_rxgearboxslip_ext
+    ad_connect  axi_mxfe_rx_jesd/rx_phy${j} jesd204_phy/rx${j}
 
-    # link clock to adapter
-    ad_connect $rx_link_clock  rx_adapt_${j}/usr_clk
-    ad_connect $tx_link_clock  tx_adapt_${j}/usr_clk
   }
 
-  ad_connect $sys_cpu_clk jesd204_phy/apb3clk_quad
-  ad_connect $sys_cpu_clk jesd204_phy/apb3clk_gt_bridge_ip_0
+  ad_connect $sys_cpu_clk jesd204_phy/apb3clk
 
-  ad_connect GND jesd204_phy/rate_sel_gt_bridge_ip_0
-
-  ad_connect GND jesd204_phy/reset_rx_pll_and_datapath_in
-  ad_connect GND jesd204_phy/reset_tx_pll_and_datapath_in
-
-  ad_connect gt_reset jesd204_phy/gt_reset_gt_bridge_ip_0
-
-  ad_connect axi_mxfe_rx_jesd/rx_axi/device_reset jesd204_phy/reset_rx_datapath_in
-  ad_connect axi_mxfe_tx_jesd/tx_axi/device_reset jesd204_phy/reset_tx_datapath_in
+  ad_connect axi_mxfe_rx_jesd/rx_axi/device_reset jesd204_phy/reset_rx_pll_and_datapath_in
+  ad_connect axi_mxfe_tx_jesd/tx_axi/device_reset jesd204_phy/reset_tx_pll_and_datapath_in
 
   ad_connect  $rx_link_clock /axi_mxfe_rx_jesd/link_clk
   ad_connect  rx_device_clk /axi_mxfe_rx_jesd/device_clk
@@ -369,8 +348,6 @@ ad_connect  $sys_dma_resetn $adc_data_offload_name/m_axis_aresetn
 ad_connect  tx_device_clk_rstgen/peripheral_aresetn $dac_data_offload_name/m_axis_aresetn
 ad_connect  $sys_dma_resetn $dac_data_offload_name/s_axis_aresetn
 
-ad_connect  rx_device_clk_rstgen/peripheral_reset util_mxfe_cpack/reset
-ad_connect  tx_device_clk_rstgen/peripheral_reset util_mxfe_upack/reset
 ad_connect  $sys_dma_resetn axi_mxfe_rx_dma/m_dest_axi_aresetn
 ad_connect  $sys_dma_resetn axi_mxfe_tx_dma/m_src_axi_aresetn
 ad_connect  $sys_cpu_resetn $dac_data_offload_name/s_axi_aresetn
@@ -467,6 +444,64 @@ if {$ADI_PHY_SEL == 1} {
   make_bd_intf_pins_external  [get_bd_intf_pins jesd204_phy/GT_Serial]
 }
 
+#
+# Sync at TPL level 
+#
+
+create_bd_port -dir I ext_sync_in
+
+# Enable ADC external sync
+ad_ip_parameter rx_mxfe_tpl_core/adc_tpl_core CONFIG.EXT_SYNC 1
+ad_connect ext_sync_in rx_mxfe_tpl_core/adc_tpl_core/adc_sync_in
+
+# Enable DAC external sync
+ad_ip_parameter tx_mxfe_tpl_core/dac_tpl_core CONFIG.EXT_SYNC 1
+ad_connect ext_sync_in tx_mxfe_tpl_core/dac_tpl_core/dac_sync_in
+
+ad_ip_instance util_vector_logic manual_sync_or [list \
+  C_SIZE 1 \
+  C_OPERATION {or} \
+]
+
+ad_connect rx_mxfe_tpl_core/adc_tpl_core/adc_sync_manual_req_out manual_sync_or/Op1
+ad_connect tx_mxfe_tpl_core/dac_tpl_core/dac_sync_manual_req_out manual_sync_or/Op2
+
+ad_connect manual_sync_or/Res tx_mxfe_tpl_core/dac_tpl_core/dac_sync_manual_req_in
+ad_connect manual_sync_or/Res rx_mxfe_tpl_core/adc_tpl_core/adc_sync_manual_req_in
+
+# Reset pack cores
+ad_ip_instance util_reduced_logic cpack_rst_logic
+ad_ip_parameter cpack_rst_logic config.c_operation {or}
+ad_ip_parameter cpack_rst_logic config.c_size {3}
+
+ad_ip_instance util_vector_logic rx_do_rstout_logic
+ad_ip_parameter rx_do_rstout_logic config.c_operation {not}
+ad_ip_parameter rx_do_rstout_logic config.c_size {1}
+
+ad_connect $adc_data_offload_name/s_axis_tready rx_do_rstout_logic/Op1
+
+ad_ip_instance xlconcat cpack_reset_sources
+ad_ip_parameter cpack_reset_sources config.num_ports {3}
+ad_connect rx_device_clk_rstgen/peripheral_reset cpack_reset_sources/in0
+ad_connect rx_mxfe_tpl_core/adc_tpl_core/adc_rst cpack_reset_sources/in1
+ad_connect rx_do_rstout_logic/res cpack_reset_sources/in2
+
+ad_connect cpack_reset_sources/dout cpack_rst_logic/op1
+ad_connect cpack_rst_logic/res util_mxfe_cpack/reset
+
+# Reset unpack cores
+ad_ip_instance util_reduced_logic upack_rst_logic
+ad_ip_parameter upack_rst_logic config.c_operation {or}
+ad_ip_parameter upack_rst_logic config.c_size {2}
+
+ad_ip_instance xlconcat upack_reset_sources
+ad_ip_parameter upack_reset_sources config.num_ports {2}
+ad_connect tx_device_clk_rstgen/peripheral_reset upack_reset_sources/in0
+ad_connect tx_mxfe_tpl_core/dac_tpl_core/dac_rst upack_reset_sources/in1
+
+ad_connect upack_reset_sources/dout upack_rst_logic/op1
+ad_connect upack_rst_logic/res util_mxfe_upack/reset
+
 if {$TDD_SUPPORT} {
   ad_ip_instance util_tdd_sync tdd_sync_0
   ad_connect tx_device_clk tdd_sync_0/clk
@@ -475,7 +510,7 @@ if {$TDD_SUPPORT} {
   ad_connect tdd_sync_0/sync_mode GND
   ad_ip_parameter tdd_sync_0 CONFIG.TDD_SYNC_PERIOD 250000000; # More or less 1 PPS ;)
 
-  ad_ip_instance axi_tdd axi_tdd_0
+  ad_ip_instance axi_tdd axi_tdd_0 [list ASYNC_TDD_SYNC 0]
   ad_connect tx_device_clk axi_tdd_0/clk
   ad_connect tx_device_clk_rstgen/peripheral_reset axi_tdd_0/rst
   ad_connect $sys_cpu_clk axi_tdd_0/s_axi_aclk
@@ -489,27 +524,9 @@ if {$TDD_SUPPORT} {
   ad_connect axi_tdd_0/tdd_tx_valid $dac_data_offload_name/sync_ext
   ad_connect axi_tdd_0/tdd_rx_valid $adc_data_offload_name/sync_ext
 
-  delete_bd_objs [get_bd_nets rx_device_clk_rstgen_peripheral_reset]
-
-  ad_ip_instance util_vector_logic cpack_rst_logic
-  ad_ip_parameter cpack_rst_logic CONFIG.C_OPERATION {OR}
-  ad_ip_parameter cpack_rst_logic CONFIG.C_SIZE {1}
-
-  if {[get_files -quiet "ad_edge_detect.v"] == ""} {
-    add_files -norecurse -fileset sources_1 "$ad_hdl_dir/library/common/ad_edge_detect.v"
-  }
-
-  create_bd_cell -type module -reference ad_edge_detect mxfe_cpack_edge_detector
-  ad_connect rx_device_clk mxfe_cpack_edge_detector/clk
-  ad_connect rx_device_clk_rstgen/peripheral_reset mxfe_cpack_edge_detector/rst
-
-  ad_connect axi_tdd_0/tdd_rx_valid mxfe_cpack_edge_detector/signal_in
-
-  ad_connect rx_device_clk_rstgen/peripheral_reset cpack_rst_logic/Op1
-  ad_connect mxfe_cpack_edge_detector/signal_out cpack_rst_logic/Op2
-  ad_connect cpack_rst_logic/Res util_mxfe_cpack/reset
 
 } else {
   ad_connect GND $dac_data_offload_name/sync_ext
   ad_connect GND $adc_data_offload_name/sync_ext
 }
+

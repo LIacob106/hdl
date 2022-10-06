@@ -1,19 +1,3 @@
-
-## Define the supported tool version
-set required_vivado_version "2021.1"
-if {[info exists ::env(REQUIRED_VIVADO_VERSION)]} {
-  set required_vivado_version $::env(REQUIRED_VIVADO_VERSION)
-} elseif {[info exists REQUIRED_VIVADO_VERSION]} {
-  set required_vivado_version $REQUIRED_VIVADO_VERSION
-}
-
-## Define the ADI_IGNORE_VERSION_CHECK environment variable to skip version check
-if {[info exists ::env(ADI_IGNORE_VERSION_CHECK)]} {
-  set IGNORE_VERSION_CHECK 1
-} elseif {![info exists IGNORE_VERSION_CHECK]} {
-  set IGNORE_VERSION_CHECK 0
-}
-
 ## Define the ADI_USE_OOC_SYNTHESIS environment variable to enable out of context
 #  synthesis
 if {[info exists ::env(ADI_USE_OOC_SYNTHESIS)]} {
@@ -56,7 +40,7 @@ set p_prcfg_status ""
 # \param[parameter_list] - a list of global parameters (parameters of the
 # system_top module)
 #
-# Supported carrier names are: ac701, kc705, vc707, vcu118, kcu105, zed,
+# Supported carrier names are: ac701, kc705, vc707, vcu118, vcu128, kcu105, zed,
 # microzed, zc702, zc706, mitx405, zcu102.
 #
 proc adi_project {project_name {mode 0} {parameter_list {}} } {
@@ -80,6 +64,10 @@ proc adi_project {project_name {mode 0} {parameter_list {}} } {
   if [regexp "_vcu118$" $project_name] {
     set device "xcvu9p-flga2104-2L-e"
     set board [lindex [lsearch -all -inline [get_board_parts] *vcu118*] end]
+  }
+  if [regexp "_vcu128$" $project_name] {
+    set device "xcvu37p-fsvh2892-2L-e"
+    set board [lindex [lsearch -all -inline [get_board_parts] *vcu128:part0*] end]
   }
   if [regexp "_kcu105$" $project_name] {
     set device "xcku040-ffva1156-2-e"
@@ -129,6 +117,11 @@ proc adi_project {project_name {mode 0} {parameter_list {}} } {
     set device "xcvc1902-vsva2197-2MP-e-S"
     set board [lindex [lsearch -all -inline [get_board_parts] *vck190*] end]
   }
+  if [regexp "_vc709$" $project_name] {
+    set device "xc7vx690tffg1761-2"
+    set board [lindex [lsearch -all -inline [get_board_parts] *vc709*] end]
+  }
+
   adi_project_create $project_name $mode $parameter_list $device $board
 }
 
@@ -158,7 +151,7 @@ proc adi_project_create {project_name mode parameter_list device {board "not-app
   ## update the value of $p_device only if it was not already updated elsewhere
   if {$p_device eq "none"} {
     set p_device $device
-  } 
+  }
   set p_board $board
 
   if [regexp "^xc7z" $p_device] {
@@ -205,8 +198,12 @@ proc adi_project_create {project_name mode parameter_list device {board "not-app
   }
 
   set lib_dirs $ad_hdl_dir/library
-  if {$ad_hdl_dir ne $ad_ghdl_dir} {
-    lappend lib_dirs $ad_ghdl_dir/library
+  if {[info exists ::env(ADI_GHDL_DIR)]} {
+    if {$ad_hdl_dir ne $ad_ghdl_dir} {
+      lappend lib_dirs $ad_ghdl_dir/library
+    }
+  } else {
+    # puts -nonew-line "INFO: ADI_GHDL_DIR not defined.\n"
   }
 
   # Set a common IP cache for all projects
@@ -283,6 +280,8 @@ proc adi_project_files {project_name project_files} {
   foreach pfile $project_files {
     if {[string range $pfile [expr 1 + [string last . $pfile]] end] == "xdc"} {
       add_files -norecurse -fileset constrs_1 $pfile
+    } elseif [regexp "_constr.tcl" $pfile] {
+      add_files -norecurse -fileset sources_1 $pfile
     } else {
       add_files -norecurse -fileset sources_1 $pfile
     }

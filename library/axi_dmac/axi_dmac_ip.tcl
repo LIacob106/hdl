@@ -1,7 +1,9 @@
 # ip
 
-source ../scripts/adi_env.tcl
+source ../../scripts/adi_env.tcl
 source $ad_hdl_dir/library/scripts/adi_ip_xilinx.tcl
+
+global VIVADO_IP_LIBRARY
 
 adi_ip_create axi_dmac
 adi_ip_files axi_dmac [list \
@@ -23,7 +25,7 @@ adi_ip_files axi_dmac [list \
   "request_generator.v" \
   "response_handler.v" \
   "axi_register_slice.v" \
-  "2d_transfer.v" \
+  "dmac_2d_transfer.v" \
   "dest_axi_mm.v" \
   "dest_axi_stream.v" \
   "dest_fifo_inf.v" \
@@ -45,10 +47,10 @@ adi_ip_bd axi_dmac "bd/bd.tcl"
 
 set_property company_url {https://wiki.analog.com/resources/fpga/docs/axi_dmac} [ipx::current_core]
 
-adi_ip_add_core_dependencies { \
-	analog.com:user:util_axis_fifo:1.0 \
-	analog.com:user:util_cdc:1.0 \
-}
+adi_ip_add_core_dependencies [list \
+	analog.com:$VIVADO_IP_LIBRARY:util_axis_fifo:1.0 \
+	analog.com:$VIVADO_IP_LIBRARY:util_cdc:1.0 \
+]
 
 set_property display_name "ADI AXI DMA Controller" [ipx::current_core]
 set_property description "ADI AXI DMA Controller" [ipx::current_core]
@@ -237,6 +239,7 @@ foreach {k v} { \
 		"AXI_SLICE_DEST" "false" \
 		"DISABLE_DEBUG_REGISTERS" "false" \
     "ENABLE_DIAGNOSTICS_IF" "false" \
+    "CACHE_COHERENT_DEST" "false" \
 	} { \
 	set_property -dict [list \
 			"value_format" "bool" \
@@ -258,7 +261,7 @@ set_property -dict [list \
 foreach dir {"SRC" "DEST"} {
 	set_property -dict [list \
 		"value_validation_type" "list" \
-		"value_validation_list" "16 32 64 128 256 512 1024" \
+		"value_validation_list" "16 32 64 128 256 512 1024 2048" \
 	] \
 	[ipx::get_user_parameters DMA_DATA_WIDTH_${dir} -of_objects $cc]
 
@@ -308,6 +311,7 @@ foreach {dir group} [list "SRC" $src_group "DEST" $dest_group] {
 	ipgui::move_param -component $cc -order 2 $p -parent $group
 	set_property -dict [list \
 		"display_name" "Bus Width" \
+    "tooltip" "Bus Width: For Memory-Mapped interface the valid range is 32-1024 bits" \
 	] $p
 
 	set p [ipgui::get_guiparamspec -name "AXI_SLICE_${dir}" -component $cc]
@@ -322,6 +326,18 @@ ipgui::move_param -component $cc -order 4 $p -parent $src_group
 set_property -dict [list \
 	"display_name" "Transfer Start Synchronization Support" \
 ] $p
+
+set p [ipgui::get_guiparamspec -name "CACHE_COHERENT_DEST" -component $cc]
+ipgui::move_param -component $cc -order 4 $p -parent $dest_group
+set_property -dict [list \
+	"tooltip" "Assume destination port ensures cache coherency (e.g. Ultrascale HPC port)" \
+] $p
+set_property -dict [list \
+	"display_name" "Assume cache coherent" \
+	"enablement_tcl_expr" "\$DMA_TYPE_DEST == 0 && \$DMA_AXI_PROTOCOL_DEST == 0" \
+	"value_tcl_expr" "\$DMA_TYPE_DEST == 0 && \$DMA_AXI_PROTOCOL_DEST == 0" \
+	"enablement_value" "false" \
+] [ipx::get_user_parameters CACHE_COHERENT_DEST -of_objects $cc]
 
 set general_group [ipgui::add_group -name "General Configuration" -component $cc \
 		-parent $page0 -display_name "General Configuration"]
